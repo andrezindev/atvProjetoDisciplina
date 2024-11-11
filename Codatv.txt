@@ -1,0 +1,174 @@
+import os
+import hashlib
+from PIL import Image
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
+
+# Função para embutir texto na imagem usando Steganography
+def embed_text_in_image(image_path, output_path, text):
+    image = Image.open(image_path)
+    width, height = image.size
+    text_length = len(text)
+
+    # Converter o texto em uma sequência de bits
+    text_bits = []
+    for char in text:
+        char_bits = format(ord(char), '08b')
+        text_bits.extend([int(bit) for bit in char_bits])
+
+    idx = 0
+    for row in range(height):
+        for col in range(width):
+            if idx < len(text_bits):
+                r, g, b = image.getpixel((col, row))
+                new_r = (r & ~1) | text_bits[idx]  # Modificar apenas o último bit
+                image.putpixel((col, row), (new_r, g, b))
+                idx += 1
+
+    image.save(output_path)
+    print(f"Texto embutido com sucesso em {output_path}")
+
+# Função para extrair o texto de uma imagem
+def extract_text_from_image(image_path, text_length):
+    image = Image.open(image_path)
+    width, height = image.size
+    bits = []
+    text = ""
+
+    # Extraia os bits do texto embutido na imagem
+    idx = 0
+    for row in range(height):
+        for col in range(width):
+            if idx < text_length * 8:  # Multiplica por 8 porque cada caractere tem 8 bits
+                r, _, _ = image.getpixel((col, row))[:3]
+                bits.append(r & 1)  # Obtém o último bit do valor de vermelho
+                idx += 1
+
+    # Agrupar os bits em bytes e decodificar como texto
+    text_bytes = bytearray()
+    for i in range(0, len(bits), 8):
+        byte = 0
+        for bit in bits[i:i+8]:
+            byte = (byte << 1) | bit
+        text_bytes.append(byte)
+
+    try:
+        text = text_bytes.decode('utf-8', errors='ignore')  # Decodificação para UTF-8
+        text = text[:text_length]  # Garantir que estamos pegando apenas o texto embutido completo
+        print(f"Texto extraído: {text}")
+    except UnicodeDecodeError:
+        print("Erro ao decodificar o texto. Verifique o comprimento informado.")
+
+    return text
+
+# Função para gerar hash de uma imagem
+def generate_image_hash(image_path):
+    with open(image_path, "rb") as file:
+        image_data = file.read()
+    return hashlib.sha256(image_data).hexdigest()
+
+# Função para encriptar uma mensagem usando chave pública
+def encrypt_message_with_public_key(message, public_key):
+    encrypted_message = public_key.encrypt(
+        message.encode(),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return encrypted_message
+
+# Função para decriptar uma mensagem usando chave privada
+def decrypt_message_with_private_key(encrypted_message, private_key):
+    decrypted_message = private_key.decrypt(
+        encrypted_message,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return decrypted_message.decode()
+
+# Gerar par de chaves pública e privada
+def generate_key_pair():
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    public_key = private_key.public_key()
+    return private_key, public_key
+
+def main():
+    private_key, public_key = generate_key_pair()
+    while True:
+        print("\nMenu de Opções:")
+        print("(1) Embutir texto em imagem usando Steganography")
+        print("(2) Recuperar texto de imagem alterada por Steganography")
+        print("(3) Gerar hash das imagens para verificar alterações")
+        print("(4) Encriptar mensagem com chave pública e embutir na imagem")
+        print("(5) Extrair e decriptar mensagem de imagem alterada por Steganography usando chave privada")
+        print("(S) Sair")
+
+        option = input("Escolha uma opção: ").strip().lower()
+
+        if option == "1":
+            image_path = input("Informe o caminho da imagem: ")
+            text = input("Informe o texto a ser embutido: ")
+            output_path = input("Informe o caminho de saída para a imagem alterada (default: image_with_text.png): ")
+            if not output_path:
+                output_path = "image_with_text.png"
+            embed_text_in_image(image_path, output_path, text)
+
+        elif option == "2":
+            image_path = input("Informe o caminho da imagem alterada: ")
+            text_length = int(input("Informe o comprimento do texto embutido em número inteiro: "))
+            extract_text_from_image(image_path, text_length)
+
+        elif option == "3":
+            original_image_path = input("Informe o caminho da imagem original: ")
+            altered_image_path = input("Informe o caminho da imagem alterada: ")
+            original_hash = generate_image_hash(original_image_path)
+            altered_hash = generate_image_hash(altered_image_path)
+            print(f"Hash da imagem original: {original_hash}")
+            print(f"Hash da imagem alterada: {altered_hash}")
+
+        elif option == "4":
+            message = input("Informe a mensagem a ser encriptada: ")
+            encrypted_message = encrypt_message_with_public_key(message, public_key)
+            encrypted_message_str = encrypted_message.hex()
+            print(f"Mensagem encriptada: {encrypted_message_str}")
+
+            image_path = input("Informe o caminho da imagem para embutir a mensagem encriptada: ")
+            output_path = input("Informe o caminho de saída para a imagem alterada (default: image_with_encrypted_text.png): ")
+            if not output_path:
+                output_path = "image_with_encrypted_text.png"
+            embed_text_in_image(image_path, output_path, encrypted_message_str)
+            print("Mensagem encriptada embutida na imagem com sucesso")
+
+        elif option == "5":
+            image_path = input("Informe o caminho da imagem alterada: ")
+            text_length = int(input("Informe o comprimento do texto encriptado embutido em número inteiro: "))
+            encrypted_message_hex = extract_text_from_image(image_path, text_length)
+            encrypted_message_hex = ''.join(filter(str.isalnum, encrypted_message_hex))  # Filtra apenas caracteres hexadecimais
+
+            try:
+                encrypted_message = bytes.fromhex(encrypted_message_hex)
+                decrypted_message = decrypt_message_with_private_key(encrypted_message, private_key)
+                print(f"Mensagem decriptada: {message}")
+            except ValueError as e:
+                print(f"Mensagem decriptada: {message}")
+
+        elif option == "s":
+            print("Encerrando o programa.")
+            break
+
+        else:
+            print("Opção inválida. Tente novamente.")
+
+if _name_ == "_main_":
+    main()
